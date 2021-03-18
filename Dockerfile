@@ -1,74 +1,169 @@
-# Copyright (c) 2020 Red Hat, Inc.
-# This program and the accompanying materials are made
-# available under the terms of the Eclipse Public License 2.0
-# which is available at https://www.eclipse.org/legal/epl-2.0/
-#
-# SPDX-License-Identifier: EPL-2.0
-#
+#  Copyright (c) Jupyter Development Team.
+# Distributed under the terms of the Modified BSD License.
 
-FROM fedora:32
+# Ubuntu 20.04 (focal)
+# https://hub.docker.com/_/ubuntu/?tab=tags&name=focal
+# OS/ARCH: linux/amd64
+ARG ROOT_CONTAINER=ubuntu:focal-20210217@sha256:e3d7ff9efd8431d9ef39a144c45992df5502c995b9ba3c53ff70c5b52a848d9c
 
-# Product name:
-#   ideaIC    - IntelliJ Idea Community
-#   ideaIU    - IntelliJ Idea Ultimate
-#   WebStorm  - WebStorm
-ARG PRODUCT_NAME="ideaIC"
+ARG BASE_CONTAINER=$ROOT_CONTAINER
+FROM $BASE_CONTAINER
 
-# Product version
-ARG PRODUCT_VERSION="2020.2.3"
+LABEL maintainer="Jupyter Project <jupyter@googlegroups.com>"
+ARG NB_USER="jovyan"
+ARG NB_UID="1000"
+ARG NB_GID="100"
 
-# Product url constructs based on PRODUCT_NAME and PRODUCT_VERSION:
-#   https://download.jetbrains.com/idea/ideaIC-2020.2.3.tar.gz
-#   https://download.jetbrains.com/idea/ideaIU-2020.2.3.tar.gz
-#   https://download.jetbrains.com/webstorm/WebStorm-2020.2.3.tar.gz
+# Fix DL4006
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-ARG BASE_MOUNT_FOLDER="/JetBrains"
+USER root
 
-# which is used by novnc to find websockify
-RUN yum install -y tigervnc-server supervisor wget java-11-openjdk-devel novnc fluxbox git which nss libXScrnSaver mesa-libgbm
+# ---- Miniforge installer ----
+# Default values can be overridden at build time
+# (ARGS are in lower case to distinguish them from ENV)
+# Check https://github.com/conda-forge/miniforge/releases
+# Conda version
+ARG conda_version="4.9.2"
+# Miniforge installer patch version
+ARG miniforge_patch_number="7"
+# Miniforge installer architecture
+ARG miniforge_arch="x86_64"
+# Package Manager and Python implementation to use (https://github.com/conda-forge/miniforge)
+# - conda only: either Miniforge3 to use Python or Miniforge-pypy3 to use PyPy
+# - conda + mamba: either Mambaforge to use Python or Mambaforge-pypy3 to use PyPy
+ARG miniforge_python="Mambaforge"
 
-RUN mkdir /${PRODUCT_NAME}-${PRODUCT_VERSION} && \
-    case ${PRODUCT_NAME} in \
-        "ideaIC"|"ideaIU") \
-            wget -qO- https://download.jetbrains.com/idea/${PRODUCT_NAME}-${PRODUCT_VERSION}.tar.gz | tar -zxv --strip-components=1 -C /${PRODUCT_NAME}-${PRODUCT_VERSION} && \
-            ln -s /${PRODUCT_NAME}-${PRODUCT_VERSION}/bin/idea.sh /opt/run-ide.sh \
-            ;; \
-        "WebStorm") \
-            wget -qO- https://download.jetbrains.com/webstorm/${PRODUCT_NAME}-${PRODUCT_VERSION}.tar.gz | tar -zxv --strip-components=1 -C /${PRODUCT_NAME}-${PRODUCT_VERSION} && \
-            ln -s /${PRODUCT_NAME}-${PRODUCT_VERSION}/bin/webstorm.sh /opt/run-ide.sh \
-            ;; \
-    esac && \
-    mkdir -p ${BASE_MOUNT_FOLDER}/${PRODUCT_NAME} && \
-    mkdir /etc/default/jetbrains && \
-    for f in "${BASE_MOUNT_FOLDER}" "/${PRODUCT_NAME}-${PRODUCT_VERSION}" "/etc/passwd" "/etc/default/jetbrains"; do \
-      echo "Changing permissions on ${f}" && chgrp -R 0 ${f} && \
-      chmod -R g+rwX ${f}; \
-    done && \
-    echo "idea.config.path=${BASE_MOUNT_FOLDER}/${PRODUCT_NAME}/config" > /${PRODUCT_NAME}-${PRODUCT_VERSION}/bin/idea.properties && \
-    echo "idea.system.path=${BASE_MOUNT_FOLDER}/${PRODUCT_NAME}/caches" >> /${PRODUCT_NAME}-${PRODUCT_VERSION}/bin/idea.properties && \
-    echo "idea.plugins.path=${BASE_MOUNT_FOLDER}/${PRODUCT_NAME}/plugins" >> /${PRODUCT_NAME}-${PRODUCT_VERSION}/bin/idea.properties && \
-    echo "idea.log.path=${BASE_MOUNT_FOLDER}/${PRODUCT_NAME}/logs" >> /${PRODUCT_NAME}-${PRODUCT_VERSION}/bin/idea.properties
+# Miniforge archive to install
+ARG miniforge_version="${conda_version}-${miniforge_patch_number}"
+# Miniforge installer
+ARG miniforge_installer="${miniforge_python}-${miniforge_version}-Linux-${miniforge_arch}.sh"
+# Miniforge checksum
+ARG miniforge_checksum="5a827a62d98ba2217796a9dc7673380257ed7c161017565fba8ce785fb21a599"
 
-# Copy fluxbox configuration
-COPY --chown=0:0 config/fluxbox /home/user/.fluxbox/init
+# Install all OS dependencies for notebook server that starts but lacks all
+# features (e.g., download as all possible file formats)
+ENV DEBIAN_FRONTEND noninteractive
+RUN apt-get -q update \
+ && apt-get install -yq --no-install-recommends \
+    wget \
+    ca-certificates \
+    sudo \
+    locales \
+    fonts-liberation \
+    run-one \
+ && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Copy predefined configs
-COPY --chown=0:0 config/etc /etc/
+RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && \
+    locale-gen
 
-# Copy sh scripts
-COPY --chown=0:0 scripts/*.sh /opt/
+# Configure environment
+ENV CONDA_DIR=/opt/conda \
+    SHELL=/bin/bash \
+    NB_USER=$NB_USER \
+    NB_UID=$NB_UID \
+    NB_GID=$NB_GID \
+    LC_ALL=en_US.UTF-8 \
+    LANG=en_US.UTF-8 \
+    LANGUAGE=en_US.UTF-8
+ENV PATH=$CONDA_DIR/bin:$PATH \
+    HOME=/home/$NB_USER \
+    CONDA_VERSION="${conda_version}" \
+    MINIFORGE_VERSION="${miniforge_version}"
 
-RUN mkdir -p /home/user && \
-    chgrp -R 0 /home && \
-    chmod -R g=u /etc/passwd /etc/group /home && \
-    chmod +x /opt/*.sh
+# Copy a script that we will use to correct permissions after running certain commands
+COPY fix-permissions /usr/local/bin/fix-permissions
+RUN chmod a+rx /usr/local/bin/fix-permissions
 
-USER 10001
+# Enable prompt color in the skeleton .bashrc before creating the default NB_USER
+# hadolint ignore=SC2016
+RUN sed -i 's/^#force_color_prompt=yes/force_color_prompt=yes/' /etc/skel/.bashrc && \
+   # Add call to conda init script see https://stackoverflow.com/a/58081608/4413446
+   echo 'eval "$(command conda shell.bash hook 2> /dev/null)"' >> /etc/skel/.bashrc 
 
-ENV HOME=/home/user
-ENV JETBRAINS_PRODUCT=${PRODUCT_NAME}
-ENV JETBRAINS_PRODUCT_VERSION=${PRODUCT_VERSION}
-ENV JETBRAINS_BASE_MOUNT_FOLDER=${BASE_MOUNT_FOLDER}
-WORKDIR /projects
-ENTRYPOINT [ "/opt/entrypoint.sh" ]
-CMD ["tail", "-f", "/dev/null"]
+# Create NB_USER with name jovyan user with UID=1000 and in the 'users' group
+# and make sure these dirs are writable by the `users` group.
+RUN echo "auth requisite pam_deny.so" >> /etc/pam.d/su && \
+    sed -i.bak -e 's/^%admin/#%admin/' /etc/sudoers && \
+    sed -i.bak -e 's/^%sudo/#%sudo/' /etc/sudoers && \
+    useradd -m -s /bin/bash -N -u $NB_UID $NB_USER && \
+    mkdir -p $CONDA_DIR && \
+    chown $NB_USER:$NB_GID $CONDA_DIR && \
+    chmod g+w /etc/passwd && \
+    fix-permissions $HOME && \
+    fix-permissions $CONDA_DIR
+
+USER $NB_UID
+ARG PYTHON_VERSION=default
+
+# Setup work directory for backward-compatibility
+RUN mkdir "/home/$NB_USER/work" && \
+    fix-permissions "/home/$NB_USER"
+
+# Install conda as jovyan and check the sha256 sum provided on the download site
+WORKDIR /tmp
+
+# Prerequisites installation: conda, mamba, pip, tini
+RUN wget --quiet "https://github.com/conda-forge/miniforge/releases/download/${miniforge_version}/${miniforge_installer}" && \
+    echo "${miniforge_checksum} *${miniforge_installer}" | sha256sum --check && \
+    /bin/bash "${miniforge_installer}" -f -b -p $CONDA_DIR && \
+    rm "${miniforge_installer}" && \
+    # Conda configuration see https://conda.io/projects/conda/en/latest/configuration.html
+    echo "conda ${CONDA_VERSION}" >> $CONDA_DIR/conda-meta/pinned && \
+    conda config --system --set auto_update_conda false && \
+    conda config --system --set show_channel_urls true && \
+    if [ ! $PYTHON_VERSION = 'default' ]; then conda install --yes python=$PYTHON_VERSION; fi && \
+    conda list python | grep '^python ' | tr -s ' ' | cut -d '.' -f 1,2 | sed 's/$/.*/' >> $CONDA_DIR/conda-meta/pinned && \
+    conda install --quiet --yes \
+    "conda=${CONDA_VERSION}" \
+    'pip' \
+    'tini=0.18.0' && \
+    conda update --all --quiet --yes && \
+    conda list tini | grep tini | tr -s ' ' | cut -d ' ' -f 1,2 >> $CONDA_DIR/conda-meta/pinned && \
+    conda clean --all -f -y && \
+    rm -rf /home/$NB_USER/.cache/yarn && \
+    fix-permissions $CONDA_DIR && \
+    fix-permissions /home/$NB_USER
+
+# Install Jupyter Notebook, Lab, and Hub
+# Generate a notebook server config
+# Cleanup temporary files
+# Correct permissions
+# Do all this in a single RUN command to avoid duplicating all of the
+# files across image layers when the permissions change
+RUN conda install --quiet --yes \
+    'notebook=6.2.0' \
+    'jupyterhub=1.3.0' \
+    'jupyterlab=3.0.11' && \
+    conda clean --all -f -y && \
+    npm cache clean --force && \
+    jupyter notebook --generate-config && \
+    jupyter lab clean && \
+    rm -rf /home/$NB_USER/.cache/yarn && \
+    fix-permissions $CONDA_DIR && \
+    fix-permissions /home/$NB_USER
+
+EXPOSE 8888
+
+# Configure container startup
+ENTRYPOINT ["tini", "-g", "--"]
+CMD ["start-notebook.sh"]
+
+# Copy local files as late as possible to avoid cache busting
+COPY start.sh start-notebook.sh start-singleuser.sh /usr/local/bin/
+# Currently need to have both jupyter_notebook_config and jupyter_server_config to support classic and lab
+COPY jupyter_notebook_config.py /etc/jupyter/
+
+# Fix permissions on /etc/jupyter as root
+USER root
+
+# Prepare upgrade to JupyterLab V3.0 #1205
+RUN sed -re "s/c.NotebookApp/c.ServerApp/g" \
+    /etc/jupyter/jupyter_notebook_config.py > /etc/jupyter/jupyter_server_config.py
+
+RUN fix-permissions /etc/jupyter/
+
+# Switch back to jovyan to avoid accidental container runs as root
+USER $NB_UID
+
+WORKDIR $HOME
