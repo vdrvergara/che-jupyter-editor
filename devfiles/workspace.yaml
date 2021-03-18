@@ -1,7 +1,7 @@
 metadata:
-  name: che-ideaic
+  name: che-jupyter
 components:
   - type: cheEditor
-    reference: 'https://raw.githubusercontent.com/che-incubator/che-editor-intellij-community/master/devfiles/meta.yaml'
-    alias: ideaic-editor
+    reference: 'https://raw.githubusercontent.com/vdrvergara/che-jupyter-editor/master/devfiles/meta.yaml'
+    alias: jupyter-editor
 apiVersion: 1.0.0
