@@ -21,7 +21,7 @@
 
 ##### Use built image
 
-- A running instance of Eclipse Che `>= 7.15`. To install an instance of Eclipse Che, see [Installing Che](https://www.eclipse.org/che/docs/che-7/installation-guide/installing-che/).
+- A running instance of Red Hat Codeready Workspaces `>= 2.6`. To install an instance of , see [Installing Red Hat Codeready Workspaces](https://access.redhat.com/documentation/en-us/red_hat_codeready_workspaces/2.7/html-single/installation_guide/index).
   - Since some kubernetes configuration can be applied and kubernetes secrets use annotation `automount-workspace-secret` which is supported on Eclipse Che version `7.15` and higher. For the following information see [Mounting a secret as a file or an environment variable into a workspace container](https://www.eclipse.org/che/docs/che-7/end-user-guide/mounting-a-secret-as-a-file-or-an-environment-variable-into-a-workspace-container/)
 
 ##### Build image
@@ -34,9 +34,6 @@
 
 Current repository has the following structure described below:
 
-- `config` – contains configuration files for necessary tools and packages needed for the image build:
-  - `etc/default/jetbrains` – contains xml-based files with preliminary configuration, such as default project path or terminal specific preferences. Needed for all types of JetBrains products. In resulting image these configuration files move to `${<PRODUCT_NAME>_PROPERTIES}/config/options` folder. 
-  - `etc/tigervnc` – contains configuration files needed for vnc-related tools.
   - `etc/supervisord.conf` – configuration file needed for container supervisor. Entrypoint for the third-party scripts and tools that has to be run in container.
 - `devfiles` – sample devfile that from which a workspace can be created:
   - `meta.yaml` – is the Che Editor descriptor, that is used to instruct Che that workspace component is treated as Che Editor.
